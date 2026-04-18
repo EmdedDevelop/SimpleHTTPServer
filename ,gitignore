@@ -1,0 +1,22 @@
+# Файлы кэша IntelliSense
+*.ipch
+*.sdf
+*.ncb
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+.vs/
+x64/
+HTTPServer/x64/
+
+# Временные файлы
+*.tmp
+*.temp
+
+# Файлы сборки
+*.exe
+*.ilk
+*.pdb
+*.obj
