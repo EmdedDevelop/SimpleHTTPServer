@@ -1,0 +1,18 @@
+.vs/
+x64/
+HTTPServer/x64/
+
+*.ipch
+*.sdf
+*.ncb
+*.suo
+*.user
+*.userosscache
+
+
+
+# Файлы сборки
+*.exe
+*.ilk
+*.pdb
+*.obj
