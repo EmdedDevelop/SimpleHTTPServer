@@ -128,10 +128,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="html_funcs.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="server_funcs.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="main.h" />
+    <ClInclude Include="html_funcs.h" />
+    <ClInclude Include="html_templates.h" />
+    <ClInclude Include="server_funcs.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
