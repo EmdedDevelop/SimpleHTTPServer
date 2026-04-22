@@ -1,15 +1,11 @@
-#include <string>
 #include <iostream>
-#include <algorithm>
 #include <winsock2.h>
-#include <ws2tcpip.h>
 #include "server_funcs.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
 
 HTTP_Server http_server;
-
 
 
 int main() 

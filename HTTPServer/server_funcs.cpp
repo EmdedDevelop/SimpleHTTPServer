@@ -9,9 +9,8 @@
 
 
 
-std::string HTTP_Server::produceHtmlResponse(const std::string& browser, const std::string& os,
-    const std::string& device, unsigned req_number,
-    const std::string& language) {
+std::string HTTP_Server::produceHtmlResponse(const uint8_t browser_number, const std::string& os,
+    const std::string& device, const std::string& language) {
 
     // Определяем эмодзи для устройств
     std::string deviceEmoji;
@@ -23,11 +22,12 @@ std::string HTTP_Server::produceHtmlResponse(const std::string& browser, const s
 
     // Определяем цвет в зависимости от браузера
     std::string browserColor;
-    if (browser.find("Chrome") != std::string::npos) browserColor = "#4285F4"; // Chrome blue
-    else if (browser.find("Firefox") != std::string::npos) browserColor = "#FF7139"; // Firefox orange
-    else if (browser.find("Edge") != std::string::npos) browserColor = "#0078D7"; // Edge blue
-    else if (browser.find("Yandex") != std::string::npos) browserColor = "#FF0000"; // Yandex red
-    else if (browser.find("Opera") != std::string::npos) browserColor = "#FF1B2D"; // Opera red
+
+    if (browser_names[browser_number].find("Chrome") != std::string::npos) browserColor = "#4285F4"; // Chrome blue
+    else if (browser_names[browser_number].find("Firefox") != std::string::npos) browserColor = "#FF7139"; // Firefox orange
+    else if (browser_names[browser_number].find("Edge") != std::string::npos) browserColor = "#0078D7"; // Edge blue
+    else if (browser_names[browser_number].find("Yandex") != std::string::npos) browserColor = "#FF0000"; // Yandex red
+    else if (browser_names[browser_number].find("Opera") != std::string::npos) browserColor = "#FF1B2D"; // Opera red
     else browserColor = "#6C757D"; // Default gray
 
     // Локализация (простые примеры)
@@ -57,14 +57,14 @@ std::string HTTP_Server::produceHtmlResponse(const std::string& browser, const s
         {"{welcome}", welcome},
         {"{browser_color}", browserColor},
         {"{browser_label}", browserText},
-        {"{browser}", browser},
+        {"{browser}", browser_names[browser_number]},
         {"{os_label}", osText},
         {"{os}", os},
         {"{device_label}", deviceText},
         {"{device_emoji}", deviceEmoji},
         {"{device}", device},
         {"{request_label}", requestText},
-        {"{request_number}", std::to_string(req_number)}
+        {"{request_number}", std::to_string(req_browser_number[browser_number]++)}
     };
 
     // Заменяем плейсхолдеры в шаблоне
@@ -74,15 +74,15 @@ std::string HTTP_Server::produceHtmlResponse(const std::string& browser, const s
 
 
 std::string HTTP_Server::produceHttpResponse(const std::string& path, const std::string& userAgent,
-    unsigned req_number, const std::string& language) {
+     const std::string& language) {
 
     if (path == "/") {
-        std::string browser = detectBrowser(userAgent);
+        uint8_t browser_number = detectBrowser(userAgent);
         std::string os = detectOS(userAgent);
         std::string device = detectDeviceType(userAgent);
 
         // Получаем красивый HTML
-        std::string htmlContent = produceHtmlResponse(browser, os, device, req_number, language);
+        std::string htmlContent = produceHtmlResponse(browser_number, os, device, language);
 
         // Формируем HTTP-ответ с HTML
         std::string response =
@@ -203,14 +203,19 @@ int HTTP_Server::StartListenPort()
 }
 
 
-void HTTP_Server::ReadClientRequest(SOCKET &clientSocket)
+int HTTP_Server::ReadClientRequest(SOCKET& clientSocket)
 {
-    // Чтение запроса от клиента
-    bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
-    if (bytesReceived > 0) {
-        buffer[bytesReceived] = '\0';  // Добавляем нуль-терминатор
-        std::cout << "Received request:\n" << buffer << std::endl;
-    }
+	int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+
+    std::cout << "DEBUG: recv returned " << bytesReceived << " bytes" << std::endl;
+
+	if (bytesReceived > 0) {
+		buffer[bytesReceived] = '\0';
+		std::cout << "DEBUG: bytesReceived: "
+			<< std::string(buffer, bytesReceived) << std::endl;
+	}
+
+	return bytesReceived;
 }
 
 
@@ -229,29 +234,90 @@ void HTTP_Server::RequestHandling()
             continue;
         }
 
-        // Выводим информацию о подключении (опционально)
+        // Выводим информацию о подключении
         char clientIP[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, INET_ADDRSTRLEN);
-        std::cout << "Client connected from: " << clientIP << ":" << ntohs(clientAddr.sin_port) << std::endl;
+        if (inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, INET_ADDRSTRLEN) == nullptr) {
+            std::cerr << "Failed to convert IP address" << std::endl;
+            strcpy_s(clientIP, "unknown");
+        }
 
-        ReadClientRequest(clientSocket);
-        std::string request(buffer);
+        std::cout << "[" << req_number << "] Client connected from: "
+            << clientIP << ":" << ntohs(clientAddr.sin_port) << std::endl;
+
+        // Установи таймаут на чтение (2 секунд)
+        int timeout = 2000; // 2 секунды
+        setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO,
+            (char*)&timeout, sizeof(timeout));
+
+        // Читаем запрос от клиента
+        int bytesRead = ReadClientRequest(clientSocket);
+        if (bytesRead <= 0) {
+            std::cerr << "[" << req_number << "] Failed to read request from "
+                << clientIP << " (bytes: " << bytesRead << ")" << std::endl;
+            closesocket(clientSocket);
+            continue;
+        }
+
+        // Преобразуем в строку
+        std::string request(buffer, bytesRead);
+
+        // Проверяем, что запрос не пустой
+        if (request.empty()) {
+            std::cerr << "[" << req_number << "] Empty request from " << clientIP << std::endl;
+            closesocket(clientSocket);
+            continue;
+        }
 
         // Извлекаем путь из запроса
         std::string path = extractPath(request);
+        if (path.empty()) {
+            std::cerr << "[" << req_number << "] Invalid request path from " << clientIP << std::endl;
+            // Можно отправить 400 Bad Request
+            std::string errorResponse = "HTTP/1.1 400 Bad Request\r\n\r\n";
+            send(clientSocket, errorResponse.c_str(), static_cast<int>(errorResponse.length()), 0);
+            closesocket(clientSocket);
+            continue;
+        }
 
         // Извлекаем User-Agent и язык
         std::string userAgent = getUserAgent(request);
         std::string language = getAcceptLanguage(request);
 
         // Создаем HTML-ответ
-        std::string response = produceHttpResponse(path, userAgent, req_number++, language);
+        std::string response;
+        try {
+            response = produceHttpResponse(path, userAgent, language);
+        }
+        catch (const std::exception& e) {
+            std::cerr << "[" << req_number << "] Error generating response for "
+                << clientIP << ": " << e.what() << std::endl;
+            response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
+        }
 
         // Отправляем ответ
-        send(clientSocket, response.c_str(), static_cast<int>(response.length()), 0);
+        int bytesSent = send(clientSocket, response.c_str(),
+            static_cast<int>(response.length()), 0);
+        if (bytesSent == SOCKET_ERROR) {
+            std::cerr << "[" << req_number << "] Send failed to "
+                << clientIP << ": " << WSAGetLastError() << std::endl;
+        }
+        else if (bytesSent < static_cast<int>(response.length())) {
+            std::cerr << "[" << req_number << "] Partial send to "
+                << clientIP << ": " << bytesSent << "/"
+                << response.length() << " bytes" << std::endl;
+        }
+        else {
+            std::cout << "[" << req_number << "] Response sent to "
+                << clientIP << " (" << bytesSent << " bytes)" << std::endl;
+        }
 
         // Закрываем соединение с клиентом
         closesocket(clientSocket);
+
+        // Увеличиваем номер запроса только если всё успешно
+        req_number++;
+
+        std::cout << "[" << req_number - 1 << "] Connection closed with " << clientIP << std::endl;
     }
 }
 
@@ -281,33 +347,33 @@ int HTTP_Server::ServerInitialization()
 
 
 
-std::string HTTP_Server::detectBrowser(const std::string& userAgent) {
+uint8_t HTTP_Server::detectBrowser(const std::string& userAgent) {
     std::string ua = userAgent;
     std::transform(ua.begin(), ua.end(), ua.begin(), ::tolower); // Приводим к нижнему регистру
 
     if (ua.find("yabrowser") != std::string::npos || ua.find("yandex") != std::string::npos) {
-        return "Yandex Browser";
+        return NAME_YANDEX; 
     }
     else if (ua.find("opr") != std::string::npos || ua.find("opera") != std::string::npos) {
-        return "Opera";
+        return NAME_OPERA;
     }
     else if (ua.find("edg") != std::string::npos || ua.find("edge") != std::string::npos) {
-        return "Microsoft Edge";
+        return NAME_EDGE;
     }
     else if (ua.find("chrome") != std::string::npos) {
-        return "Google Chrome";
+        return NAME_CHROME;
     }
     else if (ua.find("firefox") != std::string::npos) {
-        return "Mozilla Firefox";
+        return NAME_MOZILLA;
     }
     else if (ua.find("safari") != std::string::npos) {
-        return "Safari";
+        return NAME_SAFARI;
     }
     else if (ua.find("trident") != std::string::npos) {
-        return "Internet Explorer";
+        return NAME_EXPLORER;
     }
     else {
-        return "Unknown Browser";
+        return NAME_UNKNOWN;
     }
 }
 
