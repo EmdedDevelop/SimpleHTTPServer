@@ -1,5 +1,4 @@
 #pragma once
-#include <string>
 
 namespace HtmlTemplates {
     // Шаблон с плейсхолдерами {lang}, {title}, {browser_color} и т.д.

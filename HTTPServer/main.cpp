@@ -1,5 +1,12 @@
 #include <iostream>
 #include <winsock2.h>
+#include <vector>
+#include <thread>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <functional>
+#include <atomic>
 #include "server_funcs.h"
 
 #pragma comment(lib, "ws2_32.lib")

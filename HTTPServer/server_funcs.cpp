@@ -3,6 +3,13 @@
 #include <ws2tcpip.h>
 #include <algorithm>
 #include <map>
+#include <vector>
+#include <thread>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <functional>
+#include <atomic>
 #include "server_funcs.h"
 #include "html_templates.h"
 #include "html_funcs.h"
@@ -174,7 +181,7 @@ void HTTP_Server::ServerAddrInit()
 }
 
 
-int HTTP_Server::BindingSocket2Addr()
+int HTTP_Server::BindingSocket2Addr() const
 {
     // Привязка сокета к адресу
     if (bind(serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
@@ -187,7 +194,7 @@ int HTTP_Server::BindingSocket2Addr()
     return 0;
 }
 
-int HTTP_Server::StartListenPort()
+int HTTP_Server::StartListenPort() const
 {
     // Начинаем прослушивать порт
     if (listen(serverSocket, SOMAXCONN) == SOCKET_ERROR) {
@@ -203,30 +210,7 @@ int HTTP_Server::StartListenPort()
 }
 
 
-
-bool HTTP_Server:: hasDataAvailable(SOCKET sock, int timeout_ms) {
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(sock, &readfds);
-
-    struct timeval tv;
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
-
-    // select возвращает:
-    // >0: данные доступны
-    // 0: таймаут (нет данных)
-    // <0: ошибка
-    int result = select(0, &readfds, nullptr, nullptr, &tv);
-
-    if (result > 0 && FD_ISSET(sock, &readfds)) {
-        return true;  // Данные есть, можно читать
-    }
-    return false;  // Нет данных или ошибка
-}
-
-
-
+#if 0
 int HTTP_Server::ReadClientRequest(const SOCKET clientSocket)
 {
 	int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
@@ -241,21 +225,38 @@ int HTTP_Server::ReadClientRequest(const SOCKET clientSocket)
 
 	return bytesReceived;
 }
+#endif
 
 
-bool HTTP_Server::safeReadClientRequest(const SOCKET clientSocket, int &bytesRead, char* clientIP)
+bool HTTP_Server::safeReadClientRequest(const SOCKET clientSocket, int &bytesRead, char* clientIP, const unsigned req_number)
 {    
-    if (hasDataAvailable(clientSocket, 200)) {
-        bytesRead = ReadClientRequest(clientSocket);
-        if (bytesRead <= 0) {
-            std::cerr << "[" << req_number << "] Failed to read request from "
-                << clientIP << " (bytes: " << bytesRead << ")" << std::endl;
-            return true;
-        }
+
+    fd_set readfds = {};
+    FD_ZERO(&readfds);
+    FD_SET(clientSocket, &readfds);
+
+    timeval tv = {};
+    tv.tv_sec = 0;
+    tv.tv_usec = 200000; // 200 мс
+
+    int selectResult = select(0, &readfds, nullptr, nullptr, &tv);
+
+    if (selectResult == 0) {
+        // Таймаут - клиент не прислал данные
+        std::cout << "[" << req_number << "] Client timeout [half-open connection]" << std::endl;
+        return true;
     }
-    else {
-        // Клиент "молчит" - закрываем соединение
-        std::cerr << "[" << req_number << "] Client sent no data (half-open connection) " << std::endl;
+
+    if (selectResult == SOCKET_ERROR) {
+        std::cout << "[" << req_number << "] Select error: " << WSAGetLastError() << std::endl;
+        return true;
+    }
+
+    // Читаем запрос
+    bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+
+    if (bytesRead <= 0) {
+        std::cout << "[" << req_number << "] Read error or client closed" << std::endl;
         return true;
     }
 
@@ -263,13 +264,105 @@ bool HTTP_Server::safeReadClientRequest(const SOCKET clientSocket, int &bytesRea
 }
 
 
+
+
+void HTTP_Server::handleClient(SOCKET clientSocket) {
+
+    // Получаем информацию о клиенте
+    sockaddr_in clientAddr = {};
+    int clientAddrSize = sizeof(clientAddr);
+    getpeername(clientSocket, (sockaddr*)&clientAddr, &clientAddrSize);
+
+    char clientIP[INET_ADDRSTRLEN];
+    if (inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, INET_ADDRSTRLEN) == nullptr) {
+        strcpy_s(clientIP, "unknown");
+    }
+
+    // Генерируем уникальный ID для этого запроса
+    static std::atomic<unsigned> globalReqNumber{ 0 };
+    unsigned req_number = globalReqNumber++;
+
+    std::cout << "[" << req_number << "] Thread "
+        << std::this_thread::get_id()
+        << " handling client: "
+        << clientIP << ":" << ntohs(clientAddr.sin_port) << std::endl;
+
+
+    int bytesRead;
+    if (safeReadClientRequest(clientSocket, bytesRead, clientIP, req_number))
+    {
+        closesocket(clientSocket);
+        return;
+    }
+
+    buffer[bytesRead] = '\0';
+    std::string request(buffer, bytesRead);
+
+    // Проверяем, что запрос не пустой
+    if (request.empty()) {
+        std::cout << "[" << req_number << "] Empty request" << std::endl;
+        closesocket(clientSocket);
+        return;
+    }
+
+    // Извлекаем путь из запроса
+    std::string path = extractPath(request);
+    if (path.empty()) {
+        std::string errorResponse = "HTTP/1.1 400 Bad Request\r\n\r\n";
+        send(clientSocket, errorResponse.c_str(),
+            static_cast<int>(errorResponse.length()), 0);
+        closesocket(clientSocket);
+        return;
+    }
+
+    // Извлекаем User-Agent и язык
+    std::string userAgent = getUserAgent(request);
+    std::string language = getAcceptLanguage(request);
+
+    // Создаем HTML-ответ
+    std::string response;
+    try {
+        response = produceHttpResponse(path, userAgent, language);
+    }
+    catch (const std::exception& e) {
+        std::cout << "[" << req_number << "] Error: " << e.what() << std::endl;
+        response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
+    }
+
+    // Отправляем ответ
+    int bytesSent = send(clientSocket, response.c_str(),
+        static_cast<int>(response.length()), 0);
+
+    if (bytesSent == SOCKET_ERROR) {
+        std::cout << "[" << req_number << "] Send failed: " << WSAGetLastError() << std::endl;
+    }
+    else {
+        std::cout << "[" << req_number << "] Response sent ("
+            << bytesSent << " bytes)" << std::endl;
+    }
+
+    // Закрываем соединение
+    closesocket(clientSocket);
+    std::cout << "[" << req_number << "] Connection closed" << std::endl;
+}
+
+
+
+
 void HTTP_Server::RequestHandling()
 {
-    unsigned req_number = 0;
+    // Создаём пул из 4 потоков (можно настроить)
+    ThreadPool pool(4);
+
+    std::cout << "Thread pool started with 4 workers" << std::endl;
+    std::cout << "Main thread ID: " << std::this_thread::get_id() << std::endl;
+
+    // Статистика
+    std::atomic<unsigned> totalConnections{ 0 };
 
     while (true) {
         // Принимаем входящее подключение
-        sockaddr_in clientAddr;
+        sockaddr_in clientAddr = {};
         int clientAddrSize = sizeof(clientAddr);
 
         SOCKET clientSocket = accept(serverSocket, (sockaddr*)&clientAddr, &clientAddrSize);
@@ -278,87 +371,26 @@ void HTTP_Server::RequestHandling()
             continue;
         }
 
+        totalConnections++;
+
         // Выводим информацию о подключении
         char clientIP[INET_ADDRSTRLEN];
         if (inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP, INET_ADDRSTRLEN) == nullptr) {
-            std::cerr << "Failed to convert IP address" << std::endl;
             strcpy_s(clientIP, "unknown");
         }
 
-        std::cout << "[" << req_number << "] Client connected from: "
-            << clientIP << ":" << ntohs(clientAddr.sin_port) << std::endl;
+        std::cout << "[Main] Accepted connection #" << totalConnections.load()
+            << " from " << clientIP << ":" << ntohs(clientAddr.sin_port) << std::endl;
 
-        // Установи таймаут на чтение (2 секунд)
-//        setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO,
- //           (char*)&timeout, sizeof(timeout));
+        // Передаём обработку в пул потоков
+        pool.enqueue([this, clientSocket]() {
+            handleClient(clientSocket);
+            });
 
-        int bytesRead;
-        if (safeReadClientRequest(clientSocket, bytesRead, clientIP))
-        {
-            closesocket(clientSocket);
-            continue;
+        // Периодически выводим статистику
+        if (totalConnections.load() % 10 == 0) {
+            std::cout << "[Main] Total connections: " << totalConnections.load() << std::endl;
         }
-
-        // Преобразуем в строку
-        std::string request(buffer, bytesRead);
-
-        // Проверяем, что запрос не пустой
-        if (request.empty()) {
-            std::cerr << "[" << req_number << "] Empty request from " << clientIP << std::endl;
-            closesocket(clientSocket);
-            continue;
-        }
-
-        // Извлекаем путь из запроса
-        std::string path = extractPath(request);
-        if (path.empty()) {
-            std::cerr << "[" << req_number << "] Invalid request path from " << clientIP << std::endl;
-            // Можно отправить 400 Bad Request
-            std::string errorResponse = "HTTP/1.1 400 Bad Request\r\n\r\n";
-            send(clientSocket, errorResponse.c_str(), static_cast<int>(errorResponse.length()), 0);
-            closesocket(clientSocket);
-            continue;
-        }
-
-        // Извлекаем User-Agent и язык
-        std::string userAgent = getUserAgent(request);
-        std::string language = getAcceptLanguage(request);
-
-        // Создаем HTML-ответ
-        std::string response;
-        try {
-            response = produceHttpResponse(path, userAgent, language);
-        }
-        catch (const std::exception& e) {
-            std::cerr << "[" << req_number << "] Error generating response for "
-                << clientIP << ": " << e.what() << std::endl;
-            response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
-        }
-
-        // Отправляем ответ
-        int bytesSent = send(clientSocket, response.c_str(),
-            static_cast<int>(response.length()), 0);
-        if (bytesSent == SOCKET_ERROR) {
-            std::cerr << "[" << req_number << "] Send failed to "
-                << clientIP << ": " << WSAGetLastError() << std::endl;
-        }
-        else if (bytesSent < static_cast<int>(response.length())) {
-            std::cerr << "[" << req_number << "] Partial send to "
-                << clientIP << ": " << bytesSent << "/"
-                << response.length() << " bytes" << std::endl;
-        }
-        else {
-            std::cout << "[" << req_number << "] Response sent to "
-                << clientIP << " (" << bytesSent << " bytes)" << std::endl;
-        }
-
-        // Закрываем соединение с клиентом
-        closesocket(clientSocket);
-
-        // Увеличиваем номер запроса только если всё успешно
-        req_number++;
-
-        std::cout << "[" << req_number - 1 << "] Connection closed with " << clientIP << std::endl;
     }
 }
 
