@@ -203,7 +203,31 @@ int HTTP_Server::StartListenPort()
 }
 
 
-int HTTP_Server::ReadClientRequest(SOCKET& clientSocket)
+
+bool HTTP_Server:: hasDataAvailable(SOCKET sock, int timeout_ms) {
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(sock, &readfds);
+
+    struct timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    // select возвращает:
+    // >0: данные доступны
+    // 0: таймаут (нет данных)
+    // <0: ошибка
+    int result = select(0, &readfds, nullptr, nullptr, &tv);
+
+    if (result > 0 && FD_ISSET(sock, &readfds)) {
+        return true;  // Данные есть, можно читать
+    }
+    return false;  // Нет данных или ошибка
+}
+
+
+
+int HTTP_Server::ReadClientRequest(const SOCKET clientSocket)
 {
 	int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
 
@@ -216,6 +240,26 @@ int HTTP_Server::ReadClientRequest(SOCKET& clientSocket)
 	}
 
 	return bytesReceived;
+}
+
+
+bool HTTP_Server::safeReadClientRequest(const SOCKET clientSocket, int &bytesRead, char* clientIP)
+{    
+    if (hasDataAvailable(clientSocket, 200)) {
+        bytesRead = ReadClientRequest(clientSocket);
+        if (bytesRead <= 0) {
+            std::cerr << "[" << req_number << "] Failed to read request from "
+                << clientIP << " (bytes: " << bytesRead << ")" << std::endl;
+            return true;
+        }
+    }
+    else {
+        // Клиент "молчит" - закрываем соединение
+        std::cerr << "[" << req_number << "] Client sent no data (half-open connection) " << std::endl;
+        return true;
+    }
+
+    return false;
 }
 
 
@@ -245,15 +289,12 @@ void HTTP_Server::RequestHandling()
             << clientIP << ":" << ntohs(clientAddr.sin_port) << std::endl;
 
         // Установи таймаут на чтение (2 секунд)
-        int timeout = 2000; // 2 секунды
-        setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO,
-            (char*)&timeout, sizeof(timeout));
+//        setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO,
+ //           (char*)&timeout, sizeof(timeout));
 
-        // Читаем запрос от клиента
-        int bytesRead = ReadClientRequest(clientSocket);
-        if (bytesRead <= 0) {
-            std::cerr << "[" << req_number << "] Failed to read request from "
-                << clientIP << " (bytes: " << bytesRead << ")" << std::endl;
+        int bytesRead;
+        if (safeReadClientRequest(clientSocket, bytesRead, clientIP))
+        {
             closesocket(clientSocket);
             continue;
         }
@@ -519,5 +560,3 @@ std::string HTTP_Server::getAcceptLanguage(const std::string& request) {
 
     return lang;
 }
-
-

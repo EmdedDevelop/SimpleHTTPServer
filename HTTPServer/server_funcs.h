@@ -3,6 +3,7 @@
 constexpr int port_num = 80;
 constexpr unsigned BUF_SIZE = 4096;
 constexpr uint8_t BROWSER_TYPES = 8;
+constexpr int timeout = 500; // 0.5 сек
 
 enum ERROR_CODES {
 	NO_ERROR_CODE = 0,
@@ -38,7 +39,9 @@ class HTTP_Server
 	int SocketCreate();
 	int WinSockInit();
 	void ServerAddrInit();
-	int ReadClientRequest(SOCKET& clientSocket);
+	int ReadClientRequest(const SOCKET clientSocket);
+	bool hasDataAvailable(const SOCKET sock, int timeout_ms);
+	bool safeReadClientRequest(const SOCKET sock, int &bytes_read, char *clientIP);
 	int BindingSocket2Addr();
 	int StartListenPort();
 	uint8_t detectBrowser(const std::string& userAgent);
