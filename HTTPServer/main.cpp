@@ -8,11 +8,21 @@
 #include <functional>
 #include <atomic>
 #include "server_funcs.h"
+#include "main.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
 
-HTTP_Server http_server;
+static HTTP_Server http_server;
+static std::mutex cout_mutex;
+
+
+
+void safe_print(const std::string& message) {
+    std::lock_guard<std::mutex> lock(cout_mutex);
+    std::cout << message << std::endl;
+}
+
 
 
 int main() 

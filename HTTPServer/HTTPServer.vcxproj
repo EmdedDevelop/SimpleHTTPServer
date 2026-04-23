@@ -135,6 +135,7 @@
   <ItemGroup>
     <ClInclude Include="html_funcs.h" />
     <ClInclude Include="html_templates.h" />
+    <ClInclude Include="main.h" />
     <ClInclude Include="server_funcs.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

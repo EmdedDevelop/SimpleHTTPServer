@@ -3,7 +3,8 @@
 constexpr int port_num = 80;
 constexpr unsigned BUF_SIZE = 4096;
 constexpr uint8_t BROWSER_TYPES = 8;
-constexpr int timeout = 500; // 0.5 сек
+//constexpr int timeout = 500; // 0.5 сек
+constexpr uint8_t MAX_THREADS = 4;
 
 enum ERROR_CODES {
 	NO_ERROR_CODE = 0,
@@ -28,12 +29,13 @@ enum BROWSER_NAMES {
 class HTTP_Server
 {
     char buffer[BUF_SIZE] = {};
-	SOCKET serverSocket;
-	sockaddr_in serverAddr;
+    SOCKET serverSocket;
+    sockaddr_in serverAddr;
 	uint8_t req_number = 0;
 	const std::string browser_names[BROWSER_TYPES] = { "Yandex Browser", "Opera", "Microsoft Edge", "Google Chrome",
 									 "Mozilla Firefox", "Safari", "Internet Explorer", "Unknown Browser" };
 	unsigned req_browser_number[BROWSER_TYPES] {};
+    std::string thread_info;
 
 
 	int SocketCreate();

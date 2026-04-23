@@ -152,7 +152,7 @@ namespace HtmlTemplates {
             <p style='margin-top: 20px;'>This page was served by a C++ HTTP server</p>
             
             <div class='server-info'>
-                Server info: C++ · Windows · Port 80 · Single-threaded
+                Server info: C++ · Windows · Port {port_number} · {thread_info}
             </div>
         </div>
     </div>

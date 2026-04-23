@@ -10,9 +10,11 @@
 #include <condition_variable>
 #include <functional>
 #include <atomic>
+#include <sstream>
 #include "server_funcs.h"
 #include "html_templates.h"
 #include "html_funcs.h"
+#include "main.h"
 
 
 
@@ -71,7 +73,9 @@ std::string HTTP_Server::produceHtmlResponse(const uint8_t browser_number, const
         {"{device_emoji}", deviceEmoji},
         {"{device}", device},
         {"{request_label}", requestText},
-        {"{request_number}", std::to_string(req_browser_number[browser_number]++)}
+        {"{request_number}", std::to_string(req_browser_number[browser_number]++)},
+        {"{port_number}", std::to_string(port_num)},
+        {"{thread_info}", thread_info},
     };
 
     // Заменяем плейсхолдеры в шаблоне
@@ -210,26 +214,9 @@ int HTTP_Server::StartListenPort() const
 }
 
 
-#if 0
-int HTTP_Server::ReadClientRequest(const SOCKET clientSocket)
-{
-	int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
-
-    std::cout << "DEBUG: recv returned " << bytesReceived << " bytes" << std::endl;
-
-	if (bytesReceived > 0) {
-		buffer[bytesReceived] = '\0';
-		std::cout << "DEBUG: bytesReceived: "
-			<< std::string(buffer, bytesReceived) << std::endl;
-	}
-
-	return bytesReceived;
-}
-#endif
-
-
 bool HTTP_Server::safeReadClientRequest(const SOCKET clientSocket, int &bytesRead, char* clientIP, const unsigned req_number)
 {    
+    std::stringstream ss;
 
     fd_set readfds = {};
     FD_ZERO(&readfds);
@@ -243,12 +230,14 @@ bool HTTP_Server::safeReadClientRequest(const SOCKET clientSocket, int &bytesRea
 
     if (selectResult == 0) {
         // Таймаут - клиент не прислал данные
-        std::cout << "[" << req_number << "] Client timeout [half-open connection]" << std::endl;
+        ss << "[" << req_number << "] Client timeout [half-open connection]" << std::endl;
+        safe_print(ss.str()); 
         return true;
     }
 
     if (selectResult == SOCKET_ERROR) {
-        std::cout << "[" << req_number << "] Select error: " << WSAGetLastError() << std::endl;
+        ss << "[" << req_number << "] Select error: " << WSAGetLastError() << std::endl;
+        safe_print(ss.str());
         return true;
     }
 
@@ -256,7 +245,8 @@ bool HTTP_Server::safeReadClientRequest(const SOCKET clientSocket, int &bytesRea
     bytesRead = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
 
     if (bytesRead <= 0) {
-        std::cout << "[" << req_number << "] Read error or client closed" << std::endl;
+        ss << "[" << req_number << "] Read error or client closed" << std::endl;
+        safe_print(ss.str());
         return true;
     }
 
@@ -270,6 +260,8 @@ void HTTP_Server::handleClient(SOCKET clientSocket) {
 
     // Получаем информацию о клиенте
     sockaddr_in clientAddr = {};
+    std::stringstream ss;
+
     int clientAddrSize = sizeof(clientAddr);
     getpeername(clientSocket, (sockaddr*)&clientAddr, &clientAddrSize);
 
@@ -282,10 +274,11 @@ void HTTP_Server::handleClient(SOCKET clientSocket) {
     static std::atomic<unsigned> globalReqNumber{ 0 };
     unsigned req_number = globalReqNumber++;
 
-    std::cout << "[" << req_number << "] Thread "
+    ss << "[" << req_number << "] Thread "
         << std::this_thread::get_id()
         << " handling client: "
         << clientIP << ":" << ntohs(clientAddr.sin_port) << std::endl;
+    safe_print(ss.str());
 
 
     int bytesRead;
@@ -300,7 +293,8 @@ void HTTP_Server::handleClient(SOCKET clientSocket) {
 
     // Проверяем, что запрос не пустой
     if (request.empty()) {
-        std::cout << "[" << req_number << "] Empty request" << std::endl;
+        ss << "[" << req_number << "] Empty request" << std::endl;
+        safe_print(ss.str());
         closesocket(clientSocket);
         return;
     }
@@ -325,7 +319,8 @@ void HTTP_Server::handleClient(SOCKET clientSocket) {
         response = produceHttpResponse(path, userAgent, language);
     }
     catch (const std::exception& e) {
-        std::cout << "[" << req_number << "] Error: " << e.what() << std::endl;
+        ss << "[" << req_number << "] Error: " << e.what() << std::endl;
+        safe_print(ss.str());
         response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
     }
 
@@ -334,16 +329,19 @@ void HTTP_Server::handleClient(SOCKET clientSocket) {
         static_cast<int>(response.length()), 0);
 
     if (bytesSent == SOCKET_ERROR) {
-        std::cout << "[" << req_number << "] Send failed: " << WSAGetLastError() << std::endl;
+        ss << "[" << req_number << "] Send failed: " << WSAGetLastError() << std::endl;
+        safe_print(ss.str());
     }
     else {
-        std::cout << "[" << req_number << "] Response sent ("
+        ss << "[" << req_number << "] Response sent ("
             << bytesSent << " bytes)" << std::endl;
+        safe_print(ss.str());
     }
 
     // Закрываем соединение
     closesocket(clientSocket);
-    std::cout << "[" << req_number << "] Connection closed" << std::endl;
+    ss << "[" << req_number << "] Connection closed" << std::endl;
+    safe_print(ss.str());
 }
 
 
@@ -351,10 +349,16 @@ void HTTP_Server::handleClient(SOCKET clientSocket) {
 
 void HTTP_Server::RequestHandling()
 {
+    std :: stringstream ss;
     // Создаём пул из 4 потоков (можно настроить)
-    ThreadPool pool(4);
+    ThreadPool pool(MAX_THREADS);
 
-    std::cout << "Thread pool started with 4 workers" << std::endl;
+    if (MAX_THREADS == 1)
+        thread_info = "Single-threaded";
+    else
+        thread_info = "Multi-threaded (" + std::to_string(MAX_THREADS) + ")";
+
+    std::cout << "Thread pool started with " << MAX_THREADS << " workers" << std::endl;
     std::cout << "Main thread ID: " << std::this_thread::get_id() << std::endl;
 
     // Статистика
@@ -379,8 +383,9 @@ void HTTP_Server::RequestHandling()
             strcpy_s(clientIP, "unknown");
         }
 
-        std::cout << "[Main] Accepted connection #" << totalConnections.load()
+        ss << "[Main] Accepted connection #" << totalConnections.load()
             << " from " << clientIP << ":" << ntohs(clientAddr.sin_port) << std::endl;
+        safe_print(ss.str());
 
         // Передаём обработку в пул потоков
         pool.enqueue([this, clientSocket]() {
@@ -389,7 +394,8 @@ void HTTP_Server::RequestHandling()
 
         // Периодически выводим статистику
         if (totalConnections.load() % 10 == 0) {
-            std::cout << "[Main] Total connections: " << totalConnections.load() << std::endl;
+            ss << "[Main] Total connections: " << totalConnections.load() << std::endl;
+            safe_print(ss.str());
         }
     }
 }
