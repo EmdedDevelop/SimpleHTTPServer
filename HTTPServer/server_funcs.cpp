@@ -59,6 +59,8 @@ std::string HTTP_Server::produceHtmlResponse(const uint8_t browser_number, const
         requestText = "Request #:";
     }
 
+    std::string timeStamp = GetCurrentTimestamp();
+
     // Создаём карту замен
     std::map<std::string, std::string> replacements = {
         {"{lang}", language.substr(0, 2)},
@@ -76,6 +78,7 @@ std::string HTTP_Server::produceHtmlResponse(const uint8_t browser_number, const
         {"{request_number}", std::to_string(req_browser_number[browser_number]++)},
         {"{port_number}", std::to_string(port_num)},
         {"{thread_info}", thread_info},
+        {"{time_stamp}", timeStamp},
     };
 
     // Заменяем плейсхолдеры в шаблоне
@@ -280,6 +283,20 @@ void HTTP_Server::handleClient(SOCKET clientSocket) {
         << clientIP << ":" << ntohs(clientAddr.sin_port) << std::endl;
     safe_print(ss.str());
 
+
+#ifdef IMITATION_OF_REALITY
+    // 1. "Работа с БД" - 50 мс
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    // 2. "Вычисления" - 30 мс
+    volatile double sum = 0;
+    for (int i = 0; i < 10000000; ++i) {
+        sum += std::sin(i * 0.001);
+    }
+
+    // 3. "Внешний API" - 70 мс  
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+#endif
 
     int bytesRead;
     if (safeReadClientRequest(clientSocket, bytesRead, clientIP, req_number))

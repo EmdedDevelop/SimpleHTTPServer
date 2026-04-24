@@ -6,6 +6,8 @@ constexpr uint8_t BROWSER_TYPES = 8;
 //constexpr int timeout = 500; // 0.5 сек
 constexpr uint8_t MAX_THREADS = 4;
 
+#define IMITATION_OF_REALITY
+
 enum ERROR_CODES {
 	NO_ERROR_CODE = 0,
 	WIN_SOCKS_INIT_FAILED,

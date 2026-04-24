@@ -150,6 +150,7 @@ namespace HtmlTemplates {
         <div class='footer'>
             <div class='request-number'>{request_label} #{request_number}</div>
             <p style='margin-top: 20px;'>This page was served by a C++ HTTP server</p>
+            <p style='margin-top: 20px;'>Built {time_stamp}</p>
             
             <div class='server-info'>
                 Server info: C++ · Windows · Port {port_number} · {thread_info}
