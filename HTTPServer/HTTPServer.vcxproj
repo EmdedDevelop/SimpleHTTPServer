@@ -131,11 +131,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="FileInfo.cpp" />
     <ClCompile Include="html_funcs.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="server_funcs.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="FileInfo.h" />
     <ClInclude Include="html_funcs.h" />
     <ClInclude Include="html_templates.h" />
     <ClInclude Include="main.h" />

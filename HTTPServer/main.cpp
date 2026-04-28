@@ -1,4 +1,4 @@
-// Built: 24 April 2026 15:20:47
+// Built: 28 April 2026 13:59:37
 #include <iostream>
 #include <winsock2.h>
 #include <vector>
@@ -9,6 +9,7 @@
 #include <functional>
 #include <atomic>
 #include "server_funcs.h"
+#include "FileInfo.h"
 #include "main.h"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -28,6 +29,10 @@ void safe_print(const std::string& message) {
 
 int main() 
 {
+    char exePath[MAX_PATH];
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    GetExeFileInfo(exePath);
+
     unsigned error_code = http_server.ServerInitialization();
     if (error_code != NO_ERROR_CODE)
     {

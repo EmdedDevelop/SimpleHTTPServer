@@ -15,6 +15,7 @@
 #include "html_templates.h"
 #include "html_funcs.h"
 #include "main.h"
+#include "FileInfo.h"
 
 
 
@@ -59,7 +60,8 @@ std::string HTTP_Server::produceHtmlResponse(const uint8_t browser_number, const
         requestText = "Request #:";
     }
 
-    std::string timeStamp = GetCurrentTimestamp();
+    //std::string timeStamp = GetCurrentTimestamp();
+    std::string timeStamp = GetBuildDate();
 
     // Создаём карту замен
     std::map<std::string, std::string> replacements = {
